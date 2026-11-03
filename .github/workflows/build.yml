@@ -1,0 +1,197 @@
+# Builds and tests every pull request, every push to main, and on demand.
+#
+# Every action is named by its commit, not by a tag someone can move. The version each SHA was on 2026-11-03 is in the
+# comment beside it. To update one, look up the new version's commit, read what changed, and change both. Flutter
+# itself is the release archive, checked against its published SHA-256.
+name: build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: "3.47.9"
+
+jobs:
+  android:
+    name: Analyze, test, APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install Flutter ${{ env.FLUTTER_VERSION }}
+        run: |
+          archive="flutter_linux_${FLUTTER_VERSION}-stable.tar.xz"
+          curl -sSfL -o "$RUNNER_TEMP/$archive" "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/$archive"
+          echo "25ed8c3c29d51a7353f2a944310b478af8214920639524b19c50a19e6c044c5a  $RUNNER_TEMP/$archive" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
+          git config --global --add safe.directory "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - run: flutter --disable-analytics && flutter --version
+      - run: flutter pub get
+      - name: The art in the app is art/, converted
+        run: |
+          dart run tool/convert_art.dart
+          git diff --exit-code -- lib android
+      - run: flutter analyze
+      # The goldens compare pixels drawn by the host's font engine; they run in the macOS job.
+      - run: flutter test --exclude-tags golden
+      - run: flutter build apk --debug
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mossgrove-flutter-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  ios:
+    name: Goldens, simulator app
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Flutter ${{ env.FLUTTER_VERSION }}
+        run: |
+          archive="flutter_macos_arm64_${FLUTTER_VERSION}-stable.zip"
+          curl -sSfL -o "$RUNNER_TEMP/$archive" "https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/$archive"
+          echo "6545b85938745dc5070e9faf2adf70233c1811009d87fe6d27bfcda5a04b7698  $RUNNER_TEMP/$archive" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/$archive" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - run: flutter --disable-analytics && flutter --version
+      - run: flutter pub get
+      - name: Golden screenshots (docs/screenshots)
+        run: flutter test --tags golden
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: golden-failures
+          path: test/failures/
+          retention-days: 7
+      - name: Build the simulator app (arm64 and x86_64)
+        run: |
+          flutter build ios --simulator --debug --no-codesign --config-only
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build/ios/DerivedData -jobs 4 \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
+      - name: Zip it
+        run: |
+          mkdir -p dist/app
+          cp -R build/ios/DerivedData/Build/Products/Debug-iphonesimulator/Runner.app dist/app/Mossgrove.app
+          lipo -info dist/app/Mossgrove.app/Runner
+          (cd dist/app && ditto -c -k --sequesterRsrc --keepParent Mossgrove.app ../mossgrove-flutter-simulator.zip)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mossgrove-flutter-simulator-zip
+          path: dist/mossgrove-flutter-simulator.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  # The proof that the ids reach Appium: the tree UiAutomator2 reads, on an emulator (GitHub's machine).
+  android-device-ids:
+    name: Ids on an Android emulator
+    needs: android
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mossgrove-flutter-debug-apk
+          path: dist
+      - name: Let the emulator use KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: |
+            adb install -r dist/app-debug.apk
+            python3 tool/android_ids_check.py --out build/android-ids
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-ids
+          path: build/android-ids/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # The same proof for iOS: XCUITest's tree, the one Appium's XCUITest driver reads, on a simulator. It also installs
+  # the zipped simulator app on the newest iOS simulator with simctl, as NthCase does.
+  ios-device-ids:
+    name: Ids on an iOS simulator
+    needs: ios
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mossgrove-flutter-simulator-zip
+          path: dist
+      - name: Install Flutter ${{ env.FLUTTER_VERSION }}
+        run: |
+          archive="flutter_macos_arm64_${FLUTTER_VERSION}-stable.zip"
+          curl -sSfL -o "$RUNNER_TEMP/$archive" "https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/$archive"
+          echo "6545b85938745dc5070e9faf2adf70233c1811009d87fe6d27bfcda5a04b7698  $RUNNER_TEMP/$archive" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/$archive" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - run: flutter --disable-analytics && flutter pub get
+      - name: Pick a simulator on the newest iOS runtime, by its UDID
+        id: sim
+        run: |
+          read -r runtime devicetype < <(xcrun simctl list runtimes -j | python3 -c '
+          import json, sys
+          rs = [r for r in json.load(sys.stdin)["runtimes"] if r["platform"] == "iOS" and r["isAvailable"]]
+          r = max(rs, key=lambda r: [int(p) for p in r["version"].split(".")])
+          phones = [d["identifier"] for d in r["supportedDeviceTypes"] if d["productFamily"] == "iPhone"]
+          print(r["identifier"], phones[-1])')
+          udid=$(xcrun simctl create mossgrove-ci "$devicetype" "$runtime")
+          echo "runtime=$runtime udid=$udid"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+      - name: Install the zipped app with simctl and start it
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          unzip -q dist/mossgrove-flutter-simulator.zip -d dist/app
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID"
+          xcrun simctl install "$UDID" dist/app/Mossgrove.app
+          xcrun simctl launch "$UDID" com.nthcase.sample
+          sleep 10
+          xcrun simctl spawn "$UDID" launchctl list | grep -q com.nthcase.sample
+          xcrun simctl terminate "$UDID" com.nthcase.sample
+      - name: XCUITest reads every screen's ids
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          flutter build ios --simulator --debug --no-codesign --config-only
+          xcodebuild test -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug \
+            -destination "id=$UDID" -derivedDataPath build/ios/DerivedData -jobs 4 \
+            -only-testing:RunnerUITests -resultBundlePath build/ios-ids.xcresult CODE_SIGNING_ALLOWED=NO
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-ids
+          path: build/ios-ids.xcresult
+          if-no-files-found: ignore
+          retention-days: 14

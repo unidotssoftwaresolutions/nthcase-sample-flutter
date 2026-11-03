@@ -1,0 +1,4 @@
+# The golden screenshots compare pixels drawn by the host's font engine, so they run on macOS only; see
+# test/goldens_test.dart.
+tags:
+  golden:

@@ -1,0 +1,5 @@
+<!-- Flutter's template asks for INTERNET in debug and profile builds, so `flutter run` can reach the app's Dart VM
+     service for hot reload and the debugger. Mossgrove ships its debug build to test with, and the spec allows it no
+     network, so it is left out here too. The built app runs on its own without it; `flutter run` then installs and
+     starts the app but cannot attach. See README.md, "Hot reload". -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
