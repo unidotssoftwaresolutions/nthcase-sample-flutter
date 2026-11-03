@@ -84,7 +84,7 @@ Everything runs on the host: no emulator, no simulator.
 | File | What it proves |
 | --- | --- |
 | `test/data_test.dart` | the catalogue is SPEC.md §3 row for row; search, cart, orders, form rules, the shake detector, swipe directions, deep-link parsing, the SVG path reader, the art against `art/`, the version, and every fixed text of SPEC.md §6 in the app's source |
-| `test/flows_test.dart` | scenarios 01–10 played as widget tests, read from the semantics tree; the tab-reset rule; sign out |
+| `test/flows_test.dart` | scenarios 01–10 played as widget tests, read from the semantics tree; the tab-reset rule; sign out; an order stays until Settings › Empty |
 | `test/ids_test.dart` | **the id census**: every id in `nthcase/test-ids.json` on its screen, in the state the spec names, as a node of its own in the tree the engine sends to Android and iOS, on the control itself (a text field's id on the text field, a button's on the button); Gift cards has none |
 | `test/deep_link_test.dart` | the deep link through Flutter's own navigation channel: cold start, while running, unknown ids, other hosts ignored |
 | `test/goldens_test.dart` | every screen, light and dark, at 360 × 780 (macOS only; `--tags golden`) |
@@ -95,7 +95,9 @@ flutter test --update-goldens --tags golden # redraw them
 ```
 
 CI also runs the app on an Android emulator and an iOS simulator, and reads each screen's ids from the trees Appium
-reads: UiAutomator's (`tool/android_ids_check.py`) and XCUITest's (`ios/RunnerUITests/IdsUITests.swift`).
+reads: UiAutomator's (`tool/android_ids_check.py`) and XCUITest's (`ios/RunnerUITests/IdsUITests.swift`). Each walk
+is a set of parts that start from a fresh launch, so one run reports every missing id on every screen, with a screenshot
+and the tree at each; the `android-ids` and `ios-ids` artifacts hold them.
 
 ## Test it with NthCase
 

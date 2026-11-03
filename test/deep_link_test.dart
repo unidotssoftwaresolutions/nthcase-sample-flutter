@@ -22,6 +22,8 @@ void main() {
     await app.signIn();
     expect(app.read(TestIds.itemName), 'Wall Clock');
     expect(app.read(TestIds.itemNumber), 'No. 007');
+    // the item covers the Shop: Appium sees no shop_screen until Back (the first CI run's iOS test looked for it here)
+    expect(app.appiumNodes().containsKey(TestIds.shopScreen), isFalse);
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     expect(find.text('Stoneware Mug'), findsOneWidget);

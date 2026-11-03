@@ -3,6 +3,10 @@
 # Every action is named by its commit, not by a tag someone can move. The version each SHA was on 2026-11-03 is in the
 # comment beside it. To update one, look up the new version's commit, read what changed, and change both. Flutter
 # itself is the release archive, checked against its published SHA-256.
+#
+# Every check runs even when an earlier one failed, so one run tells everything: a check step runs once the setup it
+# needs succeeded (`!cancelled()` and that step's outcome), a job that needs another's build runs whenever that build
+# was uploaded, and each job still fails if any of its checks failed. Results and screenshots are uploaded either way.
 name: build
 
 on:
@@ -41,16 +45,23 @@ jobs:
           git config --global --add safe.directory "$RUNNER_TEMP/flutter"
           echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
       - run: flutter --disable-analytics && flutter --version
-      - run: flutter pub get
+      - id: pub
+        run: flutter pub get
       - name: The art in the app is art/, converted
+        if: ${{ !cancelled() && steps.pub.outcome == 'success' }}
         run: |
           dart run tool/convert_art.dart
           git diff --exit-code -- lib android
-      - run: flutter analyze
+      - if: ${{ !cancelled() && steps.pub.outcome == 'success' }}
+        run: flutter analyze
       # The goldens compare pixels drawn by the host's font engine; they run in the macOS job.
-      - run: flutter test --exclude-tags golden
-      - run: flutter build apk --debug
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - if: ${{ !cancelled() && steps.pub.outcome == 'success' }}
+        run: flutter test --exclude-tags golden
+      - id: apk
+        if: ${{ !cancelled() && steps.pub.outcome == 'success' }}
+        run: flutter build apk --debug
+      - if: ${{ !cancelled() && steps.apk.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mossgrove-flutter-debug-apk
           path: build/app/outputs/flutter-apk/app-debug.apk
@@ -71,28 +82,36 @@ jobs:
           unzip -q "$RUNNER_TEMP/$archive" -d "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
       - run: flutter --disable-analytics && flutter --version
-      - run: flutter pub get
+      - id: pub
+        run: flutter pub get
       - name: Golden screenshots (docs/screenshots)
+        id: goldens
+        if: ${{ !cancelled() && steps.pub.outcome == 'success' }}
         run: flutter test --tags golden
-      - if: failure()
+      - if: ${{ !cancelled() && steps.goldens.outcome == 'failure' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: golden-failures
           path: test/failures/
           retention-days: 7
       - name: Build the simulator app (arm64 and x86_64)
+        id: build
+        if: ${{ !cancelled() && steps.pub.outcome == 'success' }}
         run: |
           flutter build ios --simulator --debug --no-codesign --config-only
           xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath build/ios/DerivedData -jobs 4 \
             ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
       - name: Zip it
+        id: zip
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           mkdir -p dist/app
           cp -R build/ios/DerivedData/Build/Products/Debug-iphonesimulator/Runner.app dist/app/Mossgrove.app
           lipo -info dist/app/Mossgrove.app/Runner
           (cd dist/app && ditto -c -k --sequesterRsrc --keepParent Mossgrove.app ../mossgrove-flutter-simulator.zip)
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - if: ${{ !cancelled() && steps.zip.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mossgrove-flutter-simulator-zip
           path: dist/mossgrove-flutter-simulator.zip
@@ -103,6 +122,7 @@ jobs:
   android-device-ids:
     name: Ids on an Android emulator
     needs: android
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -124,6 +144,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          # the walk goes through every part even when one fails, then fails once with every missing id
           script: |
             adb install -r dist/app-debug.apk
             python3 tool/android_ids_check.py --out build/android-ids
@@ -140,6 +161,7 @@ jobs:
   ios-device-ids:
     name: Ids on an iOS simulator
     needs: ios
+    if: ${{ !cancelled() }}
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
@@ -169,6 +191,7 @@ jobs:
           echo "runtime=$runtime udid=$udid"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
       - name: Install the zipped app with simctl and start it
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
         env:
           UDID: ${{ steps.sim.outputs.udid }}
         run: |
@@ -180,7 +203,9 @@ jobs:
           sleep 10
           xcrun simctl spawn "$UDID" launchctl list | grep -q com.nthcase.sample
           xcrun simctl terminate "$UDID" com.nthcase.sample
+      # one test per part of the walk, each from a fresh launch; every missing id is reported with its line
       - name: XCUITest reads every screen's ids
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
         env:
           UDID: ${{ steps.sim.outputs.udid }}
         run: |
@@ -188,10 +213,18 @@ jobs:
           xcodebuild test -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug \
             -destination "id=$UDID" -derivedDataPath build/ios/DerivedData -jobs 4 \
             -only-testing:RunnerUITests -resultBundlePath build/ios-ids.xcresult CODE_SIGNING_ALLOWED=NO
+      - name: The screenshots and trees, out of the result bundle
+        if: always()
+        run: |
+          [ -d build/ios-ids.xcresult ] || exit 0
+          xcrun xcresulttool export attachments --path build/ios-ids.xcresult --output-path build/ios-ids-attachments \
+            || echo "could not export the attachments; they are in ios-ids.xcresult"
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ios-ids
-          path: build/ios-ids.xcresult
+          path: |
+            build/ios-ids.xcresult
+            build/ios-ids-attachments/
           if-no-files-found: ignore
           retention-days: 14

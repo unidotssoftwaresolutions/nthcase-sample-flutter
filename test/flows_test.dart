@@ -594,4 +594,38 @@ void main() {
     expect(find.text('Your cart is empty'), findsOneWidget);
     semantics.dispose();
   });
+
+  // The first CI run's id walks placed an order, then looked for "No orders yet": the app was right to list the order
+  // (SPEC.md §3, Orders). The empty state comes from a fresh start, or from Settings › Empty, as the walks now do.
+  testWidgets('a placed order stays in Orders until Settings › Empty', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final app = await TestApp.start(tester);
+    await app.signIn();
+    await app.tap(TestIds.navLab);
+    await app.tap(TestIds.labOrders);
+    expect(app.appiumNodes().keys, containsAll([TestIds.ordersEmpty, TestIds.ordersEmptyAction]));
+    await app.tap(TestIds.topBarBack);
+
+    await app.tap(TestIds.navShop);
+    await app.tap(TestIds.shopItem(1));
+    await app.tap(TestIds.itemAddToCart);
+    await app.tap(TestIds.snackbarAction);
+    await app.waitOut();
+    await app.tap(TestIds.cartCheckout);
+    await app.tap(TestIds.dialogConfirm);
+    await app.waitOut();
+    await app.tap(TestIds.navLab);
+    await app.tap(TestIds.labOrders);
+    expect(app.appiumNodes().keys, containsAll([TestIds.ordersList, TestIds.ordersRow(1)]));
+    expect(app.appiumNodes().containsKey(TestIds.ordersEmpty), isFalse);
+    await app.tap(TestIds.topBarBack);
+
+    await app.tap(TestIds.navSettings);
+    await app.tap(TestIds.settingsReset);
+    await app.tap(TestIds.settingsResetConfirm);
+    await app.waitOut();
+    await app.tap(TestIds.settingsOrders);
+    expect(app.appiumNodes().keys, containsAll([TestIds.ordersEmpty, TestIds.ordersEmptyAction]));
+    semantics.dispose();
+  });
 }
