@@ -211,7 +211,7 @@ check, `flutter analyze`, the tests and the debug APK; on `macos-latest` the gol
 two jobs run side by side, in about 5 minutes. A push that changes only `README.md`, `CONTRIBUTING.md`, `SECURITY.md`,
 `LICENSE` or `NOTICE` starts nothing; a change to `docs/screenshots/` does start CI, because those pictures are the
 goldens. The device suite (the ids on an Android emulator and on an iOS simulator, about 20 minutes more) runs on "Run
-workflow", every Monday at 03:17 UTC, and before every release: a `v*` tag publishes only when the fast checks and the
+workflow", at 03:17 UTC on the 1st of each month, and before every release: a `v*` tag publishes only when the fast checks and the
 suite are green. To start the suite by hand, open Actions → build → Run workflow on `main`, or run
 `gh workflow run build.yml --ref main`. The jobs are in [.github/workflows/ci.yml](.github/workflows/ci.yml).
 

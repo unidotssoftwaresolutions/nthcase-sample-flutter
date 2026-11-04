@@ -2,14 +2,14 @@
 #
 #   a push to main, a pull request    the fast checks only: analyze, the tests, the goldens, the APK and the zipped
 #                                     simulator app (about 5 minutes; one ubuntu and one macos job side by side)
-#   "Run workflow", every Monday      the fast checks and the device suite: the ids on an Android emulator and on an
+#   "Run workflow", the 1st monthly  the fast checks and the device suite: the ids on an Android emulator and on an
 #                                     iOS simulator (about 20 minutes more)
 #
 # A push or a pull request that changes only the files below starts nothing: no test, no build step and no script reads
 # them. docs/screenshots/ is NOT here: its pictures are the goldens the tests compare against. Nor are SPEC.md,
 # nthcase/ or art/: the tests read them.
 #
-# A newer push to the same branch or pull request cancels the older run. "Run workflow" and the weekly run are never
+# A newer push to the same branch or pull request cancels the older run. "Run workflow" and the monthly run are never
 # cancelled by a push, and release.yml has no concurrency at all: a release always runs to its end.
 name: build
 
@@ -31,8 +31,8 @@ on:
       - NOTICE
   workflow_dispatch:
   schedule:
-    # Monday 03:17 UTC: the device suite once a week, so drift in the runners' emulators and simulators is still caught
-    - cron: "17 3 * * 1"
+    # 03:17 UTC on the 1st of each month: the device suite once a month, so drift in the runners' emulators and simulators is still caught
+    - cron: "17 3 1 * *"
 
 permissions:
   contents: read
