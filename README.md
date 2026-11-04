@@ -58,7 +58,7 @@ flutter build ios --simulator --debug --no-codesign
 
 That builds `build/ios/iphonesimulator/Runner.app` for your Mac's simulator. CI builds the one it ships for both
 simulator architectures (arm64 and x86_64) with `xcodebuild … ARCHS="arm64 x86_64"`; see
-[.github/workflows/build.yml](.github/workflows/build.yml). Install it with `xcrun simctl install <udid> Runner.app`.
+[.github/workflows/ci.yml](.github/workflows/ci.yml). Install it with `xcrun simctl install <udid> Runner.app`.
 
 | | |
 | --- | --- |
@@ -94,8 +94,8 @@ flutter test --tags golden                  # compare the screenshots (macOS)
 flutter test --update-goldens --tags golden # redraw them
 ```
 
-CI also runs the app on an Android emulator and an iOS simulator, and reads each screen's ids from the trees Appium
-reads: UiAutomator's (`tool/android_ids_check.py`) and XCUITest's (`ios/RunnerUITests/IdsUITests.swift`). Each walk
+CI's device suite (see [CI](#ci)) also runs the app on an Android emulator and an iOS simulator, and reads each
+screen's ids from the trees Appium reads: UiAutomator's (`tool/android_ids_check.py`) and XCUITest's (`ios/RunnerUITests/IdsUITests.swift`). Each walk
 is a set of parts that start from a fresh launch, so one run reports every missing id on every screen, with a screenshot
 and the tree at each; the `android-ids` and `ios-ids` artifacts hold them.
 
@@ -203,6 +203,17 @@ tool/                         the art converter, the iOS icon, the Android id ch
 art/  nthcase/  SPEC.md       the shared sources, unchanged
 docs/screenshots/             every screen, light and dark
 ```
+
+## CI
+
+A push to `main` or a pull request runs the fast checks, with no emulator and no simulator: on `ubuntu-latest` the art
+check, `flutter analyze`, the tests and the debug APK; on `macos-latest` the goldens and the zipped simulator app. The
+two jobs run side by side, in about 5 minutes. A push that changes only `README.md`, `CONTRIBUTING.md`, `SECURITY.md`,
+`LICENSE` or `NOTICE` starts nothing; a change to `docs/screenshots/` does start CI, because those pictures are the
+goldens. The device suite (the ids on an Android emulator and on an iOS simulator, about 20 minutes more) runs on "Run
+workflow", every Monday at 03:17 UTC, and before every release: a `v*` tag publishes only when the fast checks and the
+suite are green. To start the suite by hand, open Actions → build → Run workflow on `main`, or run
+`gh workflow run build.yml --ref main`. The jobs are in [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 ## Licence
 
