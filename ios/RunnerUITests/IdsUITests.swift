@@ -207,15 +207,24 @@ final class IdsUITests: XCTestCase {
     expect("shop_screen")
   }
 
-  /// Signed in, from another tab: the item opens over the Shop tab.
+  /// Signed in, from another tab: the item opens over the Shop tab, and Back lands on the Shop. The link goes to the
+  /// running app the way the system sends it; `app.open(_:)` relaunched the app (a cold start is signed out), which the
+  /// second CI run showed as sign-in.
   func test11DeepLinkWhileRunning() throws {
     try signIn()
     try tap("nav_settings")
     expect("settings_screen")
-    app.open(URL(string: "nthcase-sample://item/7")!)
+    XCUIDevice.shared.system.open(URL(string: "nthcase-sample://item/7")!)
+    // the system may first ask to open the app
+    let open = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Open"]
+    if open.waitForExistence(timeout: 5) { open.tap() }
+    XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "the app is in front after the link")
     if expect("item_name", "item_number") {
+      XCTAssertEqual(element("item_name").label, "Wall Clock")
       XCTAssertEqual(element("item_number").label, "No. 007")
     }
+    absent("signin_screen")
+    absent("shop_screen")
     try tap("top_bar_back")
     expect("shop_screen")
   }

@@ -31,6 +31,24 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('while running, from Settings, the item opens over the Shop; Back lands on the Shop', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final app = await TestApp.start(tester);
+    await app.signIn();
+    await app.tap(TestIds.navSettings);
+    expect(app.appiumNodes().containsKey(TestIds.settingsScreen), isTrue);
+    await openLink(tester, 'nthcase-sample://item/7');
+    expect(app.read(TestIds.itemName), 'Wall Clock');
+    expect(app.read(TestIds.itemNumber), 'No. 007');
+    // still signed in, and the item covers the Shop tab (iOS's test11DeepLinkWhileRunning checks the same on a device)
+    expect(app.appiumNodes().containsKey(TestIds.signinScreen), isFalse);
+    expect(app.appiumNodes().containsKey(TestIds.shopScreen), isFalse);
+    await app.tap(TestIds.topBarBack);
+    expect(app.appiumNodes().containsKey(TestIds.shopScreen), isTrue);
+    expect(app.appiumNodes().containsKey(TestIds.settingsScreen), isFalse);
+    semantics.dispose();
+  });
+
   testWidgets('while running, an unknown id shows the not-found state', (tester) async {
     final semantics = tester.ensureSemantics();
     final app = await TestApp.start(tester);
