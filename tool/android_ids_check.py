@@ -12,7 +12,13 @@ library and one device on `adb`.
 The walk is a list of parts, and each part starts from a cold start (signed out, empty cart, no orders: SPEC.md §2). A
 part that cannot go on (a control it must tap is missing) is recorded and the next part starts fresh, so one run
 reports every missing id on every screen, then fails once at the end. In --out it leaves a screenshot of each screen,
-the tree and a screenshot at each failure, `ids-seen.json` and `report.txt`.
+the tree, a screenshot and what was on screen (`.txt`) at each failure, each system dialog it answered (`dialogs/`),
+`ids-seen.json` and `report.txt`.
+
+Android's own "isn't responding" and "keeps stopping" dialogs take the focus, and `uiautomator dump` reads only the
+focused window: while one is up, no id of the app can be seen and every tap lands on it. Every dump answers such a
+dialog first. One about another app is the emulator's trouble, not the app's: it is answered (Wait; Close app from the
+third time that app's dialog comes back) and listed in the report, and the walk goes on. One about the app is a failure.
 
 Never run it against a phone or emulator you did not start for it: it taps, types and installs nothing else, but it
 drives whatever `adb -s <serial>` points at.
@@ -49,6 +55,8 @@ class Device:
         self.failures = []
         self.missing = {}
         self.shots = 0
+        self.dialogs = []
+        self.dialog_counts = {}
 
     def adb(self, *args, check=True, binary=False):
         command = ["adb"] + (["-s", self.serial] if self.serial else []) + list(args)
@@ -59,6 +67,15 @@ class Device:
         return result.stdout
 
     def dump(self):
+        """The tree of the focused window, after answering any system dialog over it (at most five in a row)."""
+        root = self._dump_once()
+        for _ in range(5):
+            if not self.system_dialog(root):
+                break
+            root = self._dump_once()
+        return root
+
+    def _dump_once(self):
         for _ in range(5):
             result = self.adb("shell", "uiautomator", "dump", "/sdcard/mossgrove-window.xml", check=False)
             if "dumped" in result:
@@ -71,6 +88,71 @@ class Device:
         except ET.ParseError:
             # no window to dump (the app is starting or has stopped): an empty tree, so the wait goes on
             return ET.fromstring("<hierarchy/>")
+
+    def focus(self):
+        out = self.adb("shell", "dumpsys", "window", check=False) or ""
+        found = re.search(r"mCurrentFocus=(.*)", out)
+        return found.group(1).strip() if found else "(dumpsys window names no mCurrentFocus)"
+
+    def top_activity(self):
+        out = self.adb("shell", "dumpsys", "activity", "activities", check=False) or ""
+        found = re.search(r"topResumedActivity=(.*)", out) or re.search(r"ResumedActivity: *(.*)", out)
+        return found.group(1).strip() if found else "(dumpsys activity names no resumed activity)"
+
+    def system_dialog(self, root):
+        """Answers Android's "isn't responding" or "keeps stopping" dialog if the tree is one. Returns whether it was.
+
+        The v1.1.0 device run met "Pixel Launcher isn't responding": the emulator runner presses Menu a second after
+        boot, the launcher was not ready to take it, and the dialog stayed up over the app for the whole walk (every
+        part's tree was the dialog, so 0 ids). The system names the app in the dialog's window title, which
+        `dumpsys window` shows as the focus ("Application Not Responding: <process>" or "Application Error: <process>").
+        """
+        buttons = {n.get("resource-id"): n for n in root.iter("node")
+                   if n.get("package") == "android" and n.get("resource-id") in ("android:id/aerr_wait", "android:id/aerr_close")}
+        if not buttons:
+            return False
+        title = next((n.get("text") for n in root.iter("node") if n.get("resource-id") == "android:id/alertTitle"), None)
+        title = title or "a system dialog"
+        focus = self.focus()
+        named = re.search(r"(?:Application Not Responding|Application Error): ([\w.]+)", focus)
+        about = named.group(1) if named else None
+        path = self.screenshot("dialogs", title)
+        with open(path + ".xml", "w") as f:
+            f.write(self.last or "")
+        if about == PACKAGE or (about is None and title.startswith("Mossgrove ")):
+            self.fail(f"the system shows {title!r} about the app itself (focus: {focus})")
+            press = "android:id/aerr_close" if "android:id/aerr_close" in buttons else "android:id/aerr_wait"
+        else:
+            key = about or title
+            self.dialog_counts[key] = self.dialog_counts.get(key, 0) + 1
+            wait = "android:id/aerr_wait" in buttons and self.dialog_counts[key] < 3
+            press = "android:id/aerr_wait" if wait or "android:id/aerr_close" not in buttons else "android:id/aerr_close"
+            answer = buttons[press].get("text")
+            self.dialogs.append((self.part, title, about or "process not named", answer))
+            print(f"NOTE [{self.part}] the system showed {title!r} ({about or focus}) over the app; answered {answer!r}",
+                  flush=True)
+        x1, y1, x2, y2 = map(int, re.findall(r"\d+", buttons[press].get("bounds")))
+        self.adb("shell", "input", "tap", str((x1 + x2) // 2), str((y1 + y2) // 2))
+        time.sleep(1)
+        return True
+
+    def saw(self, root):
+        """What was on screen when ids did not come: the focused window, the top activity, the raw tree's size and its
+        first nodes, and the crash buffer."""
+        nodes = list(root.iter("node"))
+        mine = sum(1 for n in nodes if n.get("package") == PACKAGE)
+        lines = [f"focused window: {self.focus()}",
+                 f"top activity: {self.top_activity()}",
+                 f"tree: {len((self.last or '').encode())} bytes, {len(nodes)} nodes, {mine} of them {PACKAGE}'s"]
+        for n in nodes[:6]:
+            lines.append("  " + " ".join(f"{k}={n.get(k)!r}" for k in
+                                         ("class", "package", "resource-id", "text", "content-desc", "bounds") if n.get(k)))
+        if len(nodes) > 6:
+            lines.append(f"  … {len(nodes) - 6} more")
+        crash = [line for line in (self.adb("logcat", "-b", "crash", "-d", check=False) or "").splitlines() if line.strip() and not line.startswith("--------- beginning of")]
+        lines.append(f"crash buffer: {len(crash)} lines" + (", the last ones:" if crash else ""))
+        lines += ["  " + line for line in crash[-8:]]
+        return lines
 
     def app_nodes(self, root):
         return [n for n in root.iter("node") if n.get("package") == PACKAGE]
@@ -100,12 +182,14 @@ class Device:
                 f.write(self.last)
         self.failures.append((self.part, message))
         print(f"FAIL [{self.part}] {message}", flush=True)
+        return path
 
     def expect(self, *wanted, timeout=None):
         """Waits until every id is on screen as a resource-id; records each one that never came. Returns the ids seen."""
         deadline = time.time() + (timeout or self.wait)
         while True:
-            have = self.ids(self.dump())
+            root = self.dump()
+            have = self.ids(root)
             if all(w in have for w in wanted) or time.time() > deadline:
                 break
             time.sleep(1)
@@ -116,7 +200,11 @@ class Device:
         absent = [w for w in wanted if w not in have]
         if absent:
             self.missing.setdefault(self.part, []).extend(a for a in absent if a not in self.missing.get(self.part, []))
-            self.fail(f"missing {absent}; on screen: {sorted(have)}")
+            path = self.fail(f"missing {absent}; on screen: {sorted(have)}")
+            seen = self.saw(root)
+            print("\n".join("    " + line for line in seen), flush=True)
+            with open(path + ".txt", "w") as f:
+                f.write("\n".join(seen) + "\n")
         else:
             self.screenshot("screens", wanted[0])
         return have
@@ -425,6 +513,9 @@ def main():
     parser.add_argument("--wait", type=float, default=20, help="seconds to wait for a screen's ids")
     args = parser.parse_args()
     d = Device(args.serial, args.out, args.wait)
+    device = " ".join(d.adb("shell", "getprop", prop, check=False).strip()
+                      for prop in ("ro.build.fingerprint", "ro.build.version.sdk"))
+    print(f"device: {device}", flush=True)
 
     for part in PARTS:
         d.part = part.__name__
@@ -440,13 +531,16 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     with open(os.path.join(args.out, "ids-seen.json"), "w") as f:
         json.dump(d.seen, f, indent=2, ensure_ascii=False, sort_keys=True)
-    lines = [f"{len(d.seen)} ids reached UiAutomator as resource-id"]
+    lines = [f"{len(d.seen)} ids reached UiAutomator as resource-id", f"on {device}"]
     lines += [f"  {id_:32} {info['class']}" for id_, info in sorted(d.seen.items())]
     if d.failures:
         lines.append(f"{len(d.failures)} failures:")
         lines += [f"  [{part}] {message}" for part, message in d.failures]
         lines.append("missing ids, by part:")
         lines += [f"  {part}: {' '.join(ids)}" for part, ids in d.missing.items()]
+    if d.dialogs:
+        lines.append(f"{len(d.dialogs)} system dialogs about other apps, answered (not failures):")
+        lines += [f"  [{part}] {title!r} ({about}): {answer!r}" for part, title, about, answer in d.dialogs]
     report = "\n".join(lines)
     with open(os.path.join(args.out, "report.txt"), "w") as f:
         f.write(report + "\n")

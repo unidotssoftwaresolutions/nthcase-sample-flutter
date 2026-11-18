@@ -107,6 +107,11 @@ screen's ids from the trees Appium reads: UiAutomator's (`tool/android_ids_check
 is a set of parts that start from a fresh launch, so one run reports every missing id on every screen, with a screenshot
 and the tree at each; the `android-ids` and `ios-ids` artifacts hold them.
 
+On Android, a system "isn't responding" dialog takes the focus, and UiAutomator then sees only the dialog. The 1.1.0
+device run met one about Pixel Launcher, and it hid the app for the whole walk. The walk now answers such a dialog
+before it reads a screen. One about another app is answered (Wait) and listed in the report; one about Mossgrove is a
+failure. Each missing id also prints the focused window, the top activity and the first lines of the tree.
+
 ## Test it with NthCase
 
 1. Install the app on an emulator, a test phone or a simulator: `adb install app-debug.apk`, or
