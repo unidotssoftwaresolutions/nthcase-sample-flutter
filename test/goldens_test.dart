@@ -19,6 +19,7 @@ import 'package:mossgrove/src/ids.dart';
 import 'package:mossgrove/src/ui/app.dart';
 
 import 'support/harness.dart';
+import 'support/lobby.dart';
 
 /// Passes when at most this share of the pixels differ (0.5 %): enough for anti-aliasing between macOS versions, far
 /// too little for a changed text, colour or layout.
@@ -146,6 +147,28 @@ void main() {
       // the gift-cards screen has no ids, so leave it with the system Back
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
+
+      // the Lobby (spec 1.1): at open, the board with one cell tapped, the quick sheet, and with the pager off
+      await app.tap(TestIds.labLobby);
+      await shot('25-lobby');
+      await reveal(app, TestIds.lobbyBoardCell(3, 3));
+      await tester.tap(app.byId(TestIds.lobbyBoardCell(3, 3)));
+      await tester.pump(const Duration(milliseconds: 400));
+      await shot('26-lobby-board');
+      await reveal(app, TestIds.lobbyRowTile(1, 1));
+      final page = find.descendant(of: app.byId(TestIds.lobbyPage), matching: find.byType(Scrollable)).first;
+      tester.state<ScrollableState>(page).position.jumpTo(0);
+      await tester.pumpAndSettle();
+      await tester.longPress(app.byId(TestIds.lobbyTopRowTile(2)));
+      await shot('27-lobby-sheet');
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      await app.tap(TestIds.lobbyPagerShown);
+      await app.tap(TestIds.topBarBack);
+      await app.tap(TestIds.labLobby);
+      await shot('30-lobby-no-pager');
+      app.state.lobbyPagerShown = true;
+      await app.tap(TestIds.topBarBack);
 
       await app.tap(TestIds.navSettings);
       await shot('22-settings');

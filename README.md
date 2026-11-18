@@ -6,8 +6,9 @@ Clone it, build it, and run your first NthCase test on it in minutes.
 
 It is one of five identical Mossgrove apps. The same screens, test ids, texts and scenarios are built in Kotlin +
 Jetpack Compose, SwiftUI, Flutter (this one), React Native and Ionic, all from one spec: [SPEC.md](SPEC.md),
-**spec 1.0**. Every verb NthCase supports has a place to land, and so do the hard cases real apps have: a slow screen,
-a failed load with retry, a web view, a system permission prompt, a modal, and a screen with no test ids at all.
+**spec 1.1** (app version 1.1.0). Every verb NthCase supports has a place to land, and so do the hard cases real apps
+have: a slow screen, a failed load with retry, a web view, a system permission prompt, a modal, a screen with no test
+ids at all, and a lobby of many scrollers whose bar item appears late.
 
 - One Flutter app for **Android and iOS**, with the id `com.nthcase.sample` on both.
 - No network, no analytics, no ads, no tracking, no third-party packages: only Flutter's own. Everything is seeded
@@ -22,8 +23,12 @@ a failed load with retry, a web view, a system permission prompt, a modal, and a
 | <img src="docs/screenshots/light/14-gestures.png" width="180" alt="Gestures"> | <img src="docs/screenshots/light/17-slow-done.png" width="180" alt="Delivery slots"> | <img src="docs/screenshots/light/20-orders-error.png" width="180" alt="Error + retry"> | <img src="docs/screenshots/light/21-gift-cards.png" width="180" alt="No test ids"> |
 | Settings | Settings dialog | Empty search | Deep link, unknown id |
 | <img src="docs/screenshots/light/22-settings.png" width="180" alt="Settings"> | <img src="docs/screenshots/light/23-settings-dialog.png" width="180" alt="Settings dialog"> | <img src="docs/screenshots/light/05-shop-no-match.png" width="180" alt="Empty search"> | <img src="docs/screenshots/light/24-deep-link-unknown.png" width="180" alt="Deep link, unknown id"> |
+| Lobby | Lobby, the board | Lobby, the quick sheet | Lobby, pager off |
+| <img src="docs/screenshots/light/25-lobby.png" width="180" alt="Lobby"> | <img src="docs/screenshots/light/26-lobby-board.png" width="180" alt="Lobby, the board"> | <img src="docs/screenshots/light/27-lobby-sheet.png" width="180" alt="Lobby, the quick sheet"> | <img src="docs/screenshots/light/30-lobby-no-pager.png" width="180" alt="Lobby, pager off"> |
+| Lobby, dark | Lobby, the board, dark | Lobby, the quick sheet, dark | Lobby, pager off, dark |
+| <img src="docs/screenshots/dark/25-lobby.png" width="180" alt="Lobby, dark"> | <img src="docs/screenshots/dark/26-lobby-board.png" width="180" alt="Lobby, the board, dark"> | <img src="docs/screenshots/dark/27-lobby-sheet.png" width="180" alt="Lobby, the quick sheet, dark"> | <img src="docs/screenshots/dark/30-lobby-no-pager.png" width="180" alt="Lobby, pager off, dark"> |
 
-All 24 screens, light and dark, are in [docs/screenshots](docs/screenshots). They are the golden files of
+All 28 screens, light and dark, are in [docs/screenshots](docs/screenshots). They are the golden files of
 `test/goldens_test.dart`, drawn on the host by Flutter's test renderer with Roboto, not on a device. Two things no
 golden can show: the care guide's page (host tests have no web engine, so screen 15 shows the native status line over
 an empty view) and the system's notification prompt (the OS draws it).
@@ -43,7 +48,8 @@ The account is printed on the sign-in screen too, with a **Use test account** bu
 ## Build
 
 You need **Flutter 3.47.9** (stable, Dart 3.13), the Android SDK with JDK 17 or newer, and, for iOS, Xcode 26. Every
-[release](../../releases) also has ready-built apps.
+[release](../../releases) also has ready-built apps: for 1.1.0, `mossgrove-flutter-v1.1.0-debug.apk`,
+`mossgrove-flutter-v1.1.0-simulator.zip` (it holds `Mossgrove.app`) and `SHA256SUMS`.
 
 ```bash
 flutter build apk --debug
@@ -87,6 +93,8 @@ Everything runs on the host: no emulator, no simulator.
 | `test/flows_test.dart` | scenarios 01–10 played as widget tests, read from the semantics tree; the tab-reset rule; sign out; an order stays until Settings › Empty |
 | `test/ids_test.dart` | **the id census**: every id in `nthcase/test-ids.json` on its screen, in the state the spec names, as a node of its own in the tree the engine sends to Android and iOS, on the control itself (a text field's id on the text field, a button's on the button); Gift cards has none |
 | `test/deep_link_test.dart` | the deep link through Flutter's own navigation channel: cold start, while running, unknown ids, other hosts ignored |
+| `test/lobby_test.dart` | the Lobby, in the tree the engine sends: with the pager on, the scrollables run pager, Top 10 row, page; with Show the pager off the pager is not in the tree at all and the Top 10 row is first; Saved is absent until its delay (still absent at 11.8 s of 12, there at 12.2 s; a choice starts the count again); every touch logged; scrolling every scroller touches nothing; the board reaches M18; and a Flutter fault: a node taller than the page keeps its children flagged hidden while they scroll on screen |
+| `test/lobby_swipe_test.dart` | the swipe NthCase's Android reach makes (`UiScrollable`: 55 steps, 10 % dead zone) injected across the Top 10 row, the pager and row 1, at 5 and 19 ms a step, with Flutter's own gesture-arena trace of what the tile decided; a 40 ms probe |
 | `test/goldens_test.dart` | every screen, light and dark, at 360 × 780 (macOS only; `--tags golden`) |
 
 ```bash
@@ -128,6 +136,10 @@ Mossgrove and run it on my Android phone".
 | a screen with no test ids | Lab › Gift cards | 10 |
 | extract, startif / endif | the cart total; sign in only if asked | 03, 06 |
 | deep link | `nthcase-sample://item/7` | 11 |
+| scroll to an element, swipe, tap, longpress, doubletap, back, waitFor, notExists (1.1) | Lab › Lobby: a pager, a Top 10 row, chips, four tile rows, a grid, a list in the list, a board both ways, a bar whose Saved comes late, a touch log | 12–17, 19 |
+
+Scenarios 18 and 20 are for the classic-toolkit Lobby that the Android and iOS apps build as well; Flutter has one
+toolkit and one Lobby, so they do not apply here.
 
 The full table, with every check type and the known gaps, is in [SPEC.md §8](SPEC.md#8-verb-coverage).
 
@@ -152,6 +164,39 @@ The app also keeps Flutter's semantics tree on from its first frame (`SemanticsB
 tool's first look at a screen finds the ids without waiting for an accessibility service to ask for them. The
 care-guide page's elements have the same HTML `id` and `data-testid`; debug builds let Appium switch into its WEBVIEW
 context. The Gift cards screen has no ids, on purpose.
+
+## The Lobby (spec 1.1)
+
+Lab › **Lobby** is a test bench for scrolling, a busy store front with a touch log at the top that names every tap,
+long press and double tap, so a scroll that touched something by accident shows. SPEC.md §5 describes it. In Flutter:
+
+| Part | Widget |
+| --- | --- |
+| the pager | `PageView`, above the page and outside it; with **Show the pager** off it and its position line are not built at all (a conditional child) |
+| the Top 10 row | a horizontal `ListView`, between the pager and the page, outside the page |
+| the page | a vertical `ListView` |
+| chips, tile rows | horizontal `ListView`s; the chips are drawn on a `GestureDetector`, because Material's chips take no long press |
+| the grid | rows of cells in one page item; it does not scroll |
+| the inner list | a `ListView`, 240 high, inside the page |
+| the board | `TwoDimensionalScrollView`, Flutter's own two-axis scroller, with a small grid viewport (`lib/src/ui/board_view.dart`): the framework ships the view and no grid of its own |
+| the bar | Material 3 `NavigationBar`; Saved is not in its destinations until its delay has passed |
+| the quick sheet | `showModalBottomSheet`, a route of its own over the Lobby |
+| touches | `GestureDetector` with `onTap`, `onLongPress` and `onDoubleTap`, Flutter's own recognizers |
+
+**What a touch does when the finger moves.** Flutter's tap, long press and double tap each give up as soon as the
+finger moves more than the touch slop, 18 logical pixels, from where it went down, before they have won. A long press
+wins at 500 ms if the finger is still within that slop; a tap needs the finger to lift within it. So a vertical swipe
+across a tile is nothing at all unless the finger stays within 18 pixels for half a second: then it is a long press,
+and nothing later in the swipe undoes it. With the swipe NthCase's Android reach makes across the Top 10 row (about
+74 pixels in 55 steps), that takes more than about 36 ms a step; at 5 ms or 19 ms a step the tile lets go after 14
+moves. `test/lobby_swipe_test.dart` shows each case.
+
+**In the tree.** A scroller's own node has no id: `Semantics(identifier:)` always makes a node of its own, so
+`lobby_pager`, `lobby_top_row`, `lobby_page` and the rest sit on a node around the scroller, with the same bounds,
+and the scrollable node is its child. With the pager on, the first scrollable node is the pager's; with it off, the Top
+10 row's. The board is two scrollable nodes, a vertical one holding a horizontal one, because Flutter's two-axis
+scroller is two `Scrollable`s. A drag on the board moves one axis at a time: the free diagonal drag uses a pan
+recognizer that needs 36 pixels and loses every vertical drag to the page around it.
 
 ## Flutter-specific notes
 
@@ -190,15 +235,16 @@ uses GitHub's own actions and `reactivecircus/android-emulator-runner` for the e
 
 ```
 lib/main.dart                 starts the app
-lib/src/data/                 catalogue, cart, app state, form rules, shake detector, deep link
-lib/src/ui/                   the app and its Router, components, theme, art (+ art_data.g.dart, generated)
-lib/src/ui/screens/           sign in, shop, item, cart, lab, form, gestures, web view, slow, orders, gift cards, settings
+lib/src/data/                 catalogue, cart, app state, form rules, shake detector, deep link, the Lobby's data
+lib/src/ui/                   the app and its Router, components, theme, art (+ art_data.g.dart, generated), the board
+lib/src/ui/screens/           sign in, shop, item, cart, lab, form, gestures, web view, slow, orders, gift cards, settings,
+                              lobby
 lib/src/platform/device.dart  the two platform channels, and a fake for the tests
 lib/src/ids.dart              every test id
 android/                      MainActivity.kt (channels), the manifest (deep link, no INTERNET)
 ios/                          AppDelegate.swift (channels, shake), Info.plist (URL scheme), RunnerUITests
 assets/web/care-guide.html    the web view's page
-test/                         unit, flow, id-census, deep-link and golden tests
+test/                         unit, flow, id-census, deep-link, Lobby, injected-swipe and golden tests
 tool/                         the art converter, the iOS icon, the Android id check CI runs
 art/  nthcase/  SPEC.md       the shared sources, unchanged
 docs/screenshots/             every screen, light and dark

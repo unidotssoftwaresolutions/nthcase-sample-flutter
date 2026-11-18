@@ -186,3 +186,64 @@ List<String> semanticsIds(WidgetTester tester) => semanticsById(tester).keys.toL
 extension SemanticsDataChecks on SemanticsData {
   bool get tappable => hasAction(SemanticsAction.tap);
 }
+
+/// One node as the engine sends it to the platform, in the order Android's bridge adds children to the
+/// AccessibilityNodeInfo tree (and iOS's to its accessibility elements): depth first, children in traversal order,
+/// hidden children left out, and a node that merges its descendants sent alone.
+class PlatformNode {
+  PlatformNode(this.node, this.data, this.depth);
+
+  final SemanticsNode node;
+  final SemanticsData data;
+  final int depth;
+
+  String get id => data.identifier;
+
+  /// Android's rule (`BaseRoleConfigurator`): a node is `scrollable="true"` when it has any of the four scroll actions.
+  bool get scrollable =>
+      data.hasAction(SemanticsAction.scrollLeft) ||
+      data.hasAction(SemanticsAction.scrollRight) ||
+      data.hasAction(SemanticsAction.scrollUp) ||
+      data.hasAction(SemanticsAction.scrollDown);
+
+  bool get horizontal => data.hasAction(SemanticsAction.scrollLeft) || data.hasAction(SemanticsAction.scrollRight);
+
+  /// The node's bounds on the screen in physical pixels (the tests' phone is 2×), as the platform receives them.
+  Rect get rect {
+    var r = node.rect;
+    SemanticsNode? n = node;
+    while (n != null) {
+      final t = n.transform;
+      if (t != null) r = MatrixUtils.transformRect(t, r);
+      n = n.parent;
+    }
+    return r;
+  }
+
+  @override
+  String toString() =>
+      '${'  ' * depth}#${node.id}${id.isEmpty ? '' : ' id=$id'}${scrollable ? (horizontal ? ' SCROLLS-H' : ' SCROLLS-V') : ''} '
+      '[${rect.left.round()},${rect.top.round()}][${rect.right.round()},${rect.bottom.round()}]'
+      '${data.label.isEmpty ? '' : ' "${data.label.replaceAll('\n', ' / ')}"'}';
+}
+
+/// Every node the platform receives, in the order UiAutomator2 walks them (`new UiSelector().scrollable(true)` takes
+/// the first scrollable one in this order).
+List<PlatformNode> platformTree(WidgetTester tester) {
+  final out = <PlatformNode>[];
+  void walk(SemanticsNode node, int depth) {
+    final data = node.getSemanticsData();
+    out.add(PlatformNode(node, data, depth));
+    if (node.mergeAllDescendantsIntoThisNode) return;
+    for (final child in node.debugListChildrenInOrder(DebugSemanticsDumpOrder.traversalOrder)) {
+      if (child.getSemanticsData().flagsCollection.isHidden) continue;
+      walk(child, depth + 1);
+    }
+  }
+
+  for (final view in tester.binding.renderViews) {
+    final root = view.owner?.semanticsOwner?.rootSemanticsNode;
+    if (root != null) walk(root, 0);
+  }
+  return out;
+}

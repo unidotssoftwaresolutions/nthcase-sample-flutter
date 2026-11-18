@@ -15,6 +15,7 @@ import 'screens/gestures_screen.dart';
 import 'screens/gift_cards_screen.dart';
 import 'screens/item_screen.dart';
 import 'screens/lab_screen.dart';
+import 'screens/lobby_screen.dart';
 import 'screens/orders_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/shop_screen.dart';
@@ -148,6 +149,7 @@ class _AppRouter extends RouterDelegate<_Link> with ChangeNotifier, PopNavigator
       Bench.slow => const SlowScreen(),
       Bench.orders => const OrdersScreen(),
       Bench.giftCards => const GiftCardsScreen(),
+      Bench.lobby => const LobbyScreen(),
     },
   };
 }

@@ -6,8 +6,8 @@ import '../components.dart';
 import '../theme.dart';
 
 /// The app's version and the spec it builds, as the version line says them. A test checks it against pubspec.yaml.
-const appVersion = '1.0.0';
-const specVersion = '1.0';
+const appVersion = '1.1.0';
+const specVersion = '1.1';
 
 const notificationsNotAllowed = 'Not allowed. Turn this on to be asked.';
 const notificationsOff = 'Off';

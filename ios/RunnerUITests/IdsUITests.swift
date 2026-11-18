@@ -179,7 +179,7 @@ final class IdsUITests: XCTestCase {
     }
     attach("gift cards", tree: false)
     let prefixes = ["nav_", "top_bar_", "snackbar", "dialog", "signin_", "shop_", "item_", "cart_", "lab_", "form_",
-                    "gestures_", "webview", "slow_", "orders_", "settings_"]
+                    "gestures_", "webview", "slow_", "orders_", "settings_", "lobby_"]
     let identified = app.descendants(matching: .any).allElementsBoundByIndex.map(\.identifier)
       .filter { id in prefixes.contains { id.hasPrefix($0) } }
     XCTAssertEqual(identified, [], "the gift-cards screen has no ids")
@@ -227,5 +227,37 @@ final class IdsUITests: XCTestCase {
     absent("shop_screen")
     try tap("top_bar_back")
     expect("shop_screen")
+  }
+
+  /// The Lobby (SPEC.md §5, 1.1). XCUITest has no "first scrollable" as UiAutomator has, so this records the order
+  /// of the scroll views it lists, and checks the pager's scroll view comes first with Show the pager on, the Top 10
+  /// row's with it off, the pager absent when off, and Saved absent until its delay has passed. Flutter's scrollers
+  /// are UIScrollViews (FlutterScrollableSemanticsObject); each id sits on an element around one, with the same frame.
+  func test12Lobby() throws {
+    try signIn()
+    try tap("nav_lab")
+    scrollTo("lab_lobby")
+    absent("lab_lobby_views")
+    try tap("lab_lobby")
+    expect("lobby_screen", "lobby_touch_log", "lobby_touch_count", "lobby_touch_reset", "lobby_saved_delay",
+           "lobby_saved_delay_0", "lobby_saved_delay_12", "lobby_pager_shown", "lobby_pager", "lobby_banner_1",
+           "lobby_pager_position", "lobby_pager_auto", "lobby_top_row_position", "lobby_top_row", "lobby_top_row_tile_1",
+           "lobby_page", "lobby_bar", "lobby_bar_home", "lobby_bar_saved")
+    let scrollViews = { self.app.scrollViews.allElementsBoundByIndex.map(\.frame) }
+    var frames = scrollViews()
+    attach("Lobby, pager on: scroll views \(frames)", tree: true)
+    XCTAssertEqual(frames.first, element("lobby_pager").frame, "pager on: the first scroll view is the pager")
+    XCTAssertTrue(frames.contains(element("lobby_top_row").frame), "the Top 10 row is a scroll view")
+    try tap("lobby_pager_shown")
+    for gone in ["lobby_pager", "lobby_pager_position", "lobby_pager_auto", "lobby_banner_1"] {
+      absent(gone)
+    }
+    frames = scrollViews()
+    attach("Lobby, pager off: scroll views \(frames)", tree: true)
+    XCTAssertEqual(frames.first, element("lobby_top_row").frame, "pager off: the first scroll view is the Top 10 row")
+    try tap("lobby_saved_delay_12")
+    absent("lobby_bar_saved")
+    expect("lobby_bar_home", "lobby_bar_live", "lobby_bar_offers")
+    expect("lobby_bar_saved", timeout: 16)
   }
 }

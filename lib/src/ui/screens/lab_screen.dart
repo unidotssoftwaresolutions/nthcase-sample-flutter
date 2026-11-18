@@ -31,6 +31,13 @@ const _benches = [
   _Bench(TestIds.labSlow, Bench.slow, 'Delivery slots', 'Loads for 3 seconds, then shows its content'),
   _Bench(TestIds.labOrders, Bench.orders, 'Orders', 'An empty state, and an error state with retry'),
   _Bench(TestIds.labGiftCards, Bench.giftCards, 'Gift cards', 'No test ids at all: find things by their text'),
+  // spec 1.1. Flutter builds the Lobby once: there is no classic toolkit, so no "Lobby (Views)" row.
+  _Bench(
+    TestIds.labLobby,
+    Bench.lobby,
+    'Lobby',
+    'A pager, rows, a grid, a list in the list, a board and a late bar item, with a touch log',
+  ),
 ];
 
 /// The Lab: Mossgrove's second cabinet, one drawer per test bench. It says plainly what each one is for.

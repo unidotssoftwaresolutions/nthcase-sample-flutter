@@ -9,9 +9,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mossgrove/src/data/app_state.dart';
+import 'package:mossgrove/src/data/lobby.dart';
 import 'package:mossgrove/src/ids.dart';
 
 import 'support/harness.dart';
+import 'support/lobby.dart';
 
 /// Every id seen in every state below, with the node it was on.
 final Map<String, SemanticsData> seen = {};
@@ -19,7 +21,11 @@ final Map<String, SemanticsData> seen = {};
 void main() {
   final spec = jsonDecode(File('nthcase/test-ids.json').readAsStringSync()) as Map<String, Object?>;
   final entries = (spec['ids'] as List).cast<Map<String, Object?>>();
-  final native = entries.map((e) => e['id'] as String).where((id) => !id.startsWith('web_')).toList();
+  // `lab_lobby_views` is the classic-toolkit Lobby, built by the Android and iOS apps only: Flutter has one toolkit
+  final native = entries
+      .map((e) => e['id'] as String)
+      .where((id) => !id.startsWith('web_') && id != 'lab_lobby_views')
+      .toList();
 
   /// Scrolls each id on screen, as Appium scrolls to an element, and checks it is there as a node of its own.
   Future<void> present(TestApp app, List<String> ids) async {
@@ -163,7 +169,142 @@ void main() {
       TestIds.labSlow,
       TestIds.labOrders,
       TestIds.labGiftCards,
+      TestIds.labLobby,
     ]);
+    expect(app.appiumNodes().keys, isNot(contains('lab_lobby_views')), reason: 'Flutter builds the Lobby once');
+    semantics.dispose();
+  });
+
+  testWidgets('the Lobby: every id, every tile, banner, chip, cell and line, in its state', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final app = await TestApp.start(tester);
+    await openLobby(app);
+    presentNow(app, [
+      TestIds.lobbyScreen,
+      TestIds.lobbyTouchLog,
+      TestIds.lobbyTouchCount,
+      TestIds.lobbyTouchReset,
+      TestIds.lobbySavedDelay,
+      for (final s in Lobby.delays) TestIds.lobbySavedDelayChoice(s),
+      TestIds.lobbyPagerShown,
+      TestIds.lobbyPager,
+      TestIds.lobbyPagerPosition,
+      TestIds.lobbyPagerAuto,
+      TestIds.lobbyTopRowPosition,
+      TestIds.lobbyTopRow,
+      TestIds.lobbyPage,
+      TestIds.lobbyBar,
+      ...TestIds.lobbyBarItems,
+    ]);
+
+    /// Scrolls a horizontal or inner list through all its children, checking each one's node.
+    Future<void> through(String listId, List<String> ids, {Offset step = const Offset(-100, 0)}) async {
+      await reveal(app, listId);
+      // by drags only, as a swipe scrolls: no jump (support/lobby.dart, reveal, says why)
+      final area = tester.getRect(app.byId(listId));
+      for (final id in ids) {
+        for (var i = 0; i < 40; i++) {
+          final found = app.byId(id).evaluate().isNotEmpty;
+          final r = found ? tester.getRect(app.byId(id)) : null;
+          if (r != null &&
+              r.left >= area.left &&
+              r.right <= area.right &&
+              r.top >= area.top &&
+              r.bottom <= area.bottom) {
+            break;
+          }
+          await tester.dragFrom(area.center, step);
+          await tester.pumpAndSettle();
+        }
+        presentNow(app, [id]);
+      }
+    }
+
+    await through(TestIds.lobbyPager, [
+      for (var n = 1; n <= Lobby.banners; n++) TestIds.lobbyBanner(n),
+    ], step: const Offset(-300, 0));
+    await through(TestIds.lobbyTopRow, [for (var m = 1; m <= Lobby.topTiles; m++) TestIds.lobbyTopRowTile(m)]);
+    await reveal(app, TestIds.lobbyChips);
+    presentNow(app, [TestIds.lobbyChips]);
+    await through(TestIds.lobbyChips, [for (var n = 1; n <= Lobby.chips.length; n++) TestIds.lobbyChip(n)]);
+    for (var row = 1; row <= Lobby.rows; row++) {
+      await reveal(app, TestIds.lobbyRowPosition(row));
+      presentNow(app, [TestIds.lobbyRowPosition(row)]);
+      await reveal(app, TestIds.lobbyRow(row));
+      presentNow(app, [TestIds.lobbyRow(row)]);
+      await through(TestIds.lobbyRow(row), [for (var m = 1; m <= Lobby.tiles; m++) TestIds.lobbyRowTile(row, m)]);
+    }
+    await reveal(app, TestIds.lobbyGrid);
+    presentNow(app, [TestIds.lobbyGrid]);
+    // The grid is taller than the page, so Flutter keeps its cells' hidden flags from where they were when the grid
+    // last changed its clipped size (lobby_test.dart, "a node taller than the page", pins this). Cells 1–6 are
+    // checked on the way down, while the grid's top comes in; 7–12 on the way back up from the footer, while its
+    // bottom does.
+    for (var n = 1; n <= 6; n++) {
+      await reveal(app, TestIds.lobbyGridCell(n));
+      presentNow(app, [TestIds.lobbyGridCell(n)]);
+    }
+    await reveal(app, TestIds.lobbyFooter);
+    for (var n = Lobby.gridCells; n >= 7; n--) {
+      await reveal(app, TestIds.lobbyGridCell(n));
+      presentNow(app, [TestIds.lobbyGridCell(n)]);
+    }
+    await reveal(app, TestIds.lobbyInnerList);
+    presentNow(app, [TestIds.lobbyInnerList]);
+    await through(TestIds.lobbyInnerList, [
+      for (var n = 1; n <= Lobby.innerLines; n++) TestIds.lobbyInnerRow(n),
+    ], step: const Offset(0, -50));
+    await reveal(app, TestIds.lobbyBoard);
+    presentNow(app, [TestIds.lobbyBoard, TestIds.lobbyBoardCell(1, 1)]);
+    await reveal(app, TestIds.lobbyBoardPosition);
+    presentNow(app, [TestIds.lobbyBoardPosition]);
+    // the board's far corners, reached by its two scrollers
+    final board = tester.stateList<ScrollableState>(
+      // the two-axis scroll view's Scrollables are private subclasses: match by type test, not exact type
+      find.descendant(of: app.byId(TestIds.lobbyBoard), matching: find.byWidgetPredicate((w) => w is Scrollable)),
+    );
+    expect(board, hasLength(2));
+    for (final (col, row) in [(13, 18), (26, 26), (26, 1), (1, 26)]) {
+      for (final s in board) {
+        final to = s.position.axis == Axis.vertical ? (row - 1) * 56.0 : (col - 1) * 56.0;
+        s.position.jumpTo(to.clamp(0, s.position.maxScrollExtent));
+      }
+      await tester.pumpAndSettle();
+      final id = TestIds.lobbyBoardCell(col, row);
+      await reveal(app, id);
+      presentNow(app, [id]);
+    }
+    await reveal(app, TestIds.lobbyFooter);
+    presentNow(app, [TestIds.lobbyFooter]);
+
+    // the panels and the sheet
+    await reveal(app, TestIds.lobbyRowTile(1, 1));
+    await tester.tap(app.byId(TestIds.lobbyRowTile(1, 1)));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    presentNow(app, [TestIds.lobbyDetail, TestIds.lobbyDetailBack]);
+    await app.tap(TestIds.lobbyDetailBack);
+    await reveal(app, TestIds.lobbyRowTile(1, 1));
+    await tester.longPress(app.byId(TestIds.lobbyRowTile(1, 1)));
+    await tester.pumpAndSettle();
+    presentNow(app, [TestIds.lobbySheet, TestIds.lobbySheetTitle, ...TestIds.lobbySheetButtons]);
+    await app.tap(TestIds.lobbySheetOpen);
+    presentNow(app, [TestIds.lobbyDetail]);
+    await app.tap(TestIds.lobbyDetailBack);
+    tester
+        .state<ScrollableState>(
+          find.descendant(of: app.byId(TestIds.lobbyPage), matching: find.byType(Scrollable)).first,
+        )
+        .position
+        .jumpTo(0);
+    await tester.pumpAndSettle();
+    await tester.tap(app.byId(TestIds.lobbyBanner(5)));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    presentNow(app, [TestIds.lobbyPromo, TestIds.lobbyPromoBack]);
+    await app.tap(TestIds.lobbyPromoBack);
+    await app.tap(TestIds.lobbyBarSaved);
+    presentNow(app, [TestIds.lobbySavedScreen]);
     semantics.dispose();
   });
 
@@ -444,6 +585,44 @@ void main() {
       expect(seen[id]!.flagsCollection.isChecked, isNot(CheckedState.none), reason: '$id is the radio button');
       expect(seen[id]!.flagsCollection.isInMutuallyExclusiveGroup, isTrue);
     }
+    // the Lobby: every touchable takes a tap and a long press on its own node; buttons are buttons; the choices say
+    // which one is chosen
+    final lobbyTouchables = [
+      for (var n = 1; n <= Lobby.banners; n++) TestIds.lobbyBanner(n),
+      for (var m = 1; m <= Lobby.topTiles; m++) TestIds.lobbyTopRowTile(m),
+      for (var n = 1; n <= Lobby.chips.length; n++) TestIds.lobbyChip(n),
+      for (var r = 1; r <= Lobby.rows; r++)
+        for (var m = 1; m <= Lobby.tiles; m++) TestIds.lobbyRowTile(r, m),
+      for (var n = 1; n <= Lobby.gridCells; n++) TestIds.lobbyGridCell(n),
+      for (var n = 1; n <= Lobby.innerLines; n++) TestIds.lobbyInnerRow(n),
+      TestIds.lobbyBoardCell(1, 1),
+      TestIds.lobbyBoardCell(13, 18),
+    ];
+    for (final id in lobbyTouchables) {
+      expect(seen[id]!.hasAction(SemanticsAction.tap), isTrue, reason: '$id takes a tap itself');
+      expect(seen[id]!.hasAction(SemanticsAction.longPress), isTrue, reason: '$id takes a long press itself');
+    }
+    for (final id in [
+      TestIds.lobbyTouchReset,
+      TestIds.lobbyDetailBack,
+      TestIds.lobbyPromoBack,
+      ...TestIds.lobbySheetButtons,
+      for (final s in Lobby.delays) TestIds.lobbySavedDelayChoice(s),
+    ]) {
+      expect(seen[id]!.flagsCollection.isButton, isTrue, reason: '$id is the button');
+    }
+    for (final id in TestIds.lobbyBarItems) {
+      expect(seen[id]!.hasAction(SemanticsAction.tap), isTrue, reason: '$id takes a tap itself');
+    }
+    for (final id in [TestIds.lobbyPagerShown, TestIds.lobbyPagerAuto]) {
+      expect(seen[id]!.flagsCollection.isToggled, isNot(Tristate.none), reason: '$id is the switch');
+      expect(seen[id]!.label, isNotEmpty);
+    }
+    expect(seen[TestIds.lobbySavedDelayChoice(0)]!.flagsCollection.isSelected, Tristate.isTrue);
+    expect(seen[TestIds.lobbyChip(1)]!.flagsCollection.isSelected, Tristate.isTrue);
+    expect(seen[TestIds.lobbyTopRowTile(2)]!.label, 'Pocket Notebook');
+    expect(seen[TestIds.lobbyRowTile(3, 15)]!.label, allOf(contains('Bedside Lamp'), contains('No. 035')));
+    expect(seen[TestIds.lobbyBoardCell(13, 18)]!.label, 'M18');
     expect(seen[TestIds.formTerms]!.flagsCollection.isChecked, isNot(CheckedState.none));
     expect(seen[TestIds.formBudget]!.flagsCollection.isSlider, isTrue);
     expect(seen[TestIds.formBudget]!.value, r'$50');
@@ -458,8 +637,8 @@ void main() {
   });
 
   test('the shared ids list and the app agree on every name', () {
-    expect(spec['spec'], '1.0');
-    expect(entries.length, 147);
+    expect(spec['spec'], '1.1');
+    expect(entries.length, 193);
     final pattern = RegExp(spec['pattern'] as String);
     for (final e in entries) {
       final id = e['id'] as String;

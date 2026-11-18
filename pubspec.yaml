@@ -2,8 +2,8 @@ name: mossgrove
 description: "Mossgrove: an NthCase sample app for Flutter"
 publish_to: 'none'
 
-# 1.0.0 builds spec 1.0. The version line on the Settings screen says the same (a test checks it).
-version: 1.0.0+1
+# 1.1.0 builds spec 1.1. The version line on the Settings screen says the same (a test checks it).
+version: 1.1.0+2
 
 environment:
   sdk: ^3.13.7

@@ -30,7 +30,7 @@ import xml.etree.ElementTree as ET
 PACKAGE = "com.nthcase.sample"
 DEEP_LINK = "nthcase-sample://item/7"
 SPEC_IDS = re.compile(
-    r"^(nav_|top_bar_|snackbar|dialog|signin_|shop_|item_|cart_|lab_|form_|gestures_|webview|slow_|orders_|settings_)"
+    r"^(nav_|top_bar_|snackbar|dialog|signin_|shop_|item_|cart_|lab_|form_|gestures_|webview|slow_|orders_|settings_|lobby_)"
 )
 
 
@@ -360,8 +360,62 @@ def deep_link_running(d):
     d.expect("shop_screen")
 
 
+def scrollables(d, name):
+    """The scrollable nodes in the order UiAutomator2 meets them (`new UiSelector().scrollable(true)` takes the first),
+    each named by its own resource-id or the nearest one above it: Flutter puts an id on a node around its scroller,
+    with the same bounds. Leaves the tree in --out as evidence."""
+    root = d.dump()
+    path = d._file("lobby", name)
+    with open(path + ".xml", "w") as f:
+        f.write(d.last or "")
+    parents = {child: parent for parent in root.iter() for child in parent}
+    out = []
+    for n in root.iter("node"):
+        if n.get("scrollable") != "true" or n.get("package") != PACKAGE:
+            continue
+        owner, up = n.get("resource-id"), n
+        while not owner and up in parents:
+            up = parents[up]
+            owner = up.get("resource-id")
+        out.append((owner or "", n.get("bounds"), n.get("class")))
+    with open(path + "-scrollables.txt", "w") as f:
+        f.write("\n".join(f"{o} {b} {c}" for o, b, c in out) + "\n")
+    return out
+
+
+def lobby(d):
+    # SPEC.md §5 (1.1): the pager is the first scrollable; with Show the pager off it is absent and the Top 10 row is
+    # first; Saved is absent from the bar until its delay has passed. Flutter builds the Lobby once: no lab_lobby_views.
+    d.sign_in()
+    d.tap("nav_lab")
+    d.scroll_to("lab_lobby")
+    d.absent("lab_lobby_views")
+    d.tap("lab_lobby")
+    d.expect("lobby_screen", "lobby_touch_log", "lobby_touch_count", "lobby_touch_reset", "lobby_saved_delay",
+             "lobby_saved_delay_0", "lobby_saved_delay_12", "lobby_pager_shown", "lobby_pager", "lobby_banner_1",
+             "lobby_pager_position", "lobby_pager_auto", "lobby_top_row_position", "lobby_top_row",
+             "lobby_top_row_tile_1", "lobby_page", "lobby_bar", "lobby_bar_home", "lobby_bar_saved")
+    d.says("lobby_touch_log", "Nothing touched")
+    order = [o for o, _, _ in scrollables(d, "pager-on")]
+    if order[:3] != ["lobby_pager", "lobby_top_row", "lobby_page"]:
+        d.fail(f"pager on: the scrollables run {order[:5]}, not lobby_pager, lobby_top_row, lobby_page")
+    d.tap("lobby_pager_shown")
+    time.sleep(1)
+    for gone in ("lobby_pager", "lobby_pager_position", "lobby_pager_auto", "lobby_banner_1"):
+        d.absent(gone)
+    order = [o for o, _, _ in scrollables(d, "pager-off")]
+    if not order or order[0] != "lobby_top_row":
+        d.fail(f"pager off: the first scrollable is {order[:1]}, not lobby_top_row")
+    d.tap("lobby_saved_delay_12")
+    d.absent("lobby_bar_saved")
+    d.expect("lobby_bar_home", "lobby_bar_live", "lobby_bar_offers")
+    time.sleep(14)
+    d.expect("lobby_bar_saved")
+    d.says("lobby_touch_log", "Nothing touched")
+
+
 PARTS = [sign_in, orders_empty, item_cart_order, lab_form, lab_gestures, lab_webview, lab_slow, gift_cards, settings,
-         deep_link_signed_out, deep_link_running]
+         deep_link_signed_out, deep_link_running, lobby]
 
 
 def main():

@@ -20,7 +20,7 @@ final class ItemPlace extends Place {
 }
 
 /// The Lab's test benches, and Orders (also opened from Settings and the cart's snackbar).
-enum Bench { form, gestures, webview, slow, orders, giftCards }
+enum Bench { form, gestures, webview, slow, orders, giftCards, lobby }
 
 final class BenchPlace extends Place {
   const BenchPlace(this.bench);
@@ -56,6 +56,8 @@ class AppState extends ChangeNotifier {
   bool _orderUpdates = false;
   ThemeChoice _theme = ThemeChoice.system;
   String? _pendingItemId;
+  int _lobbySavedDelay = 0;
+  bool _lobbyPagerShown = true;
 
   AppTab _tab = AppTab.shop;
   final List<StackEntry> _stack = [];
@@ -82,6 +84,15 @@ class AppState extends ChangeNotifier {
 
   ThemeChoice get theme => _theme;
   set theme(ThemeChoice value) => _set(() => _theme = value);
+
+  /// The Lobby's "Saved appears after", in seconds (SPEC.md §5, 1.1). Kept in memory until the app closes, like
+  /// every setting here, and not cleared by signing out: a cold start is 0 s.
+  int get lobbySavedDelay => _lobbySavedDelay;
+  set lobbySavedDelay(int value) => _set(() => _lobbySavedDelay = value);
+
+  /// The Lobby's "Show the pager", on at a cold start and kept until the app closes.
+  bool get lobbyPagerShown => _lobbyPagerShown;
+  set lobbyPagerShown(bool value) => _set(() => _lobbyPagerShown = value);
 
   /// A deep link that arrived before sign-in; opened right after it.
   String? get pendingItemId => _pendingItemId;

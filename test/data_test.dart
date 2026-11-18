@@ -284,10 +284,14 @@ void main() {
       // each row's second cell lists quoted texts, some with words between: "A", "B", the five slots, "C"
       final quoted = [
         for (final row in section.split('\n').where((l) => l.startsWith('| ') && !l.startsWith('| Where')))
-          for (final m in RegExp(r'"(.*?)"(?=, |\s*$)').allMatches(row.split('|')[2].trim())) m.group(1)!,
+          // a quoted text, then a comma, the cell's end, or words before the next text ("A1" to "Z26", "Lobby (Views)"
+          // (Android)): the texts hold no double quote of their own
+          for (final m in RegExp(r'"([^"]*)"').allMatches(row.split('|')[2].trim())) m.group(1)!,
       ];
       final texts = quoted.where((t) {
         // placeholders and shorthand ("Swiped left/right/up/down") are checked in the flows instead
+        // the classic-toolkit Lobby's rows are Android's and iOS's only: Flutter builds the Lobby once
+        if (t == 'Lobby (Views)' || t == 'Lobby (UIKit)') return false;
         return !t.contains('<') && !t.contains('/') && t.trim().length > 1;
       }).toSet();
       expect(texts.length, greaterThan(50));

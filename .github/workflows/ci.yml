@@ -94,6 +94,11 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
         run: |
+          # a release tag must name the version the app says it is (pubspec.yaml, and the Settings line a test checks)
+          if [[ "$VERSION" == v* ]]; then
+            app="v$(sed -n 's/^version: \([^+]*\)+.*/\1/p' pubspec.yaml)"
+            [[ "$VERSION" == "$app" ]] || { echo "the tag $VERSION does not match pubspec.yaml's $app"; exit 1; }
+          fi
           flutter build apk --debug
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-debug.apk "dist/mossgrove-flutter-${VERSION}-debug.apk"
