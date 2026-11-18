@@ -188,8 +188,8 @@ extension SemanticsDataChecks on SemanticsData {
 }
 
 /// One node as the engine sends it to the platform, in the order Android's bridge adds children to the
-/// AccessibilityNodeInfo tree (and iOS's to its accessibility elements): depth first, children in traversal order,
-/// hidden children left out, and a node that merges its descendants sent alone.
+/// AccessibilityNodeInfo tree: depth first, children in traversal order, hidden children left out, and a node that
+/// merges its descendants sent alone. iOS's bridge keeps hidden children ([iosTree]).
 class PlatformNode {
   PlatformNode(this.node, this.data, this.depth);
 
@@ -205,6 +205,16 @@ class PlatformNode {
       data.hasAction(SemanticsAction.scrollRight) ||
       data.hasAction(SemanticsAction.scrollUp) ||
       data.hasAction(SemanticsAction.scrollDown);
+
+  /// iOS's rule (the engine's accessibility_bridge.mm, CreateObject): a node becomes a FlutterScrollableSemanticsObject,
+  /// a UIScrollView that XCUITest lists as a ScrollView, when it has the hasImplicitScrolling flag and is neither an
+  /// editable text field nor a switch or checkbox. Scroll actions alone do not make one.
+  bool get iosScrollView {
+    final f = data.flagsCollection;
+    final editable = f.isTextField && !f.isReadOnly;
+    final toggle = !f.isInMutuallyExclusiveGroup && (f.isToggled != Tristate.none || f.isChecked != CheckedState.none);
+    return f.hasImplicitScrolling && !editable && !toggle;
+  }
 
   bool get horizontal => data.hasAction(SemanticsAction.scrollLeft) || data.hasAction(SemanticsAction.scrollRight);
 
@@ -225,6 +235,26 @@ class PlatformNode {
       '${'  ' * depth}#${node.id}${id.isEmpty ? '' : ' id=$id'}${scrollable ? (horizontal ? ' SCROLLS-H' : ' SCROLLS-V') : ''} '
       '[${rect.left.round()},${rect.top.round()}][${rect.right.round()},${rect.bottom.round()}]'
       '${data.label.isEmpty ? '' : ' "${data.label.replaceAll('\n', ' / ')}"'}';
+}
+
+/// Every node iOS's bridge makes an object for, in the order XCUITest lists them: depth first, children in traversal
+/// order, hidden children kept (iOS only changes their traits), and a node that merges its descendants alone.
+List<PlatformNode> iosTree(WidgetTester tester) {
+  final out = <PlatformNode>[];
+  void walk(SemanticsNode node, int depth) {
+    final data = node.getSemanticsData();
+    out.add(PlatformNode(node, data, depth));
+    if (node.mergeAllDescendantsIntoThisNode) return;
+    for (final child in node.debugListChildrenInOrder(DebugSemanticsDumpOrder.traversalOrder)) {
+      walk(child, depth + 1);
+    }
+  }
+
+  for (final view in tester.binding.renderViews) {
+    final root = view.owner?.semanticsOwner?.rootSemanticsNode;
+    if (root != null) walk(root, 0);
+  }
+  return out;
 }
 
 /// Every node the platform receives, in the order UiAutomator2 walks them (`new UiSelector().scrollable(true)` takes

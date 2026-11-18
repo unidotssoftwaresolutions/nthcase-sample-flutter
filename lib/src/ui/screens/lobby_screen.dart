@@ -636,6 +636,11 @@ class _PagerBlock extends StatelessWidget {
             child: SizedBox(
               height: 100,
               child: PageView.builder(
+                // iOS makes a scroll view (a UIScrollView, XCUITest's ScrollView) only for a node with the
+                // hasImplicitScrolling flag, and a PageView sets it only with this on. Without it the pager is a plain
+                // element to XCUITest, and the Top 10 row is the first scroll view. It also builds the page on each
+                // side, hidden: Android leaves hidden nodes out of its tree, iOS keeps them.
+                allowImplicitScrolling: true,
                 controller: controller,
                 itemCount: Lobby.banners,
                 onPageChanged: (index) => onBanner(index + 1),

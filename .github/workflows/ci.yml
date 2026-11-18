@@ -88,8 +88,37 @@ jobs:
       - if: ${{ !cancelled() && steps.pub.outcome == 'success' }}
         timeout-minutes: 15
         run: flutter test --exclude-tags golden
-      - id: apk
+      # The APK build needs the NDK Flutter names (android/app/build.gradle.kts: ndkVersion = flutter.ndkVersion). When
+      # the runner lacks it, Gradle downloads it in the middle of the build, once, and a broken download fails the
+      # build ("Error reading Zip content from a SeekableByteChannel", the v1.1.0 release run). Here it is installed
+      # first, in a step of its own: up to three tries, each after removing what the last one left, then checked.
+      - name: Install the NDK Flutter's build asks for
+        id: ndk
         if: ${{ !cancelled() && steps.pub.outcome == 'success' }}
+        timeout-minutes: 20
+        run: |
+          ext="$RUNNER_TEMP/flutter/packages/flutter_tools/gradle/src/main/kotlin/FlutterExtension.kt"
+          ndk=$(sed -n 's/.*val ndkVersion: String = "\([0-9.]*\)".*/\1/p' "$ext")
+          [[ -n "$ndk" ]] || { echo "no ndkVersion in $ext: Flutter has moved it, read it from there again"; exit 1; }
+          dir="$ANDROID_HOME/ndk/$ndk"
+          installed() { grep -qx "Pkg.Revision *= *$ndk" "$dir/source.properties" 2>/dev/null; }
+          if installed; then
+            echo "NDK $ndk is on the runner already"
+            exit 0
+          fi
+          for try in 1 2 3; do
+            echo "NDK $ndk, try $try"
+            if "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" < /dev/null && installed; then
+              echo "NDK $ndk installed in $dir"
+              exit 0
+            fi
+            rm -rf "$dir" "$ANDROID_HOME/.temp"
+            [[ $try == 3 ]] || sleep $((try * 15))
+          done
+          echo "NDK $ndk did not install in three tries"
+          exit 1
+      - id: apk
+        if: ${{ !cancelled() && steps.pub.outcome == 'success' && steps.ndk.outcome == 'success' }}
         timeout-minutes: 20
         env:
           VERSION: ${{ inputs.version }}

@@ -172,7 +172,7 @@ long press and double tap, so a scroll that touched something by accident shows.
 
 | Part | Widget |
 | --- | --- |
-| the pager | `PageView`, above the page and outside it; with **Show the pager** off it and its position line are not built at all (a conditional child) |
+| the pager | `PageView` with `allowImplicitScrolling: true`, above the page and outside it; with **Show the pager** off it and its position line are not built at all (a conditional child) |
 | the Top 10 row | a horizontal `ListView`, between the pager and the page, outside the page |
 | the page | a vertical `ListView` |
 | chips, tile rows | horizontal `ListView`s; the chips are drawn on a `GestureDetector`, because Material's chips take no long press |
@@ -197,6 +197,14 @@ and the scrollable node is its child. With the pager on, the first scrollable no
 10 row's. The board is two scrollable nodes, a vertical one holding a horizontal one, because Flutter's two-axis
 scroller is two `Scrollable`s. A drag on the board moves one axis at a time: the free diagonal drag uses a pan
 recognizer that needs 36 pixels and loses every vertical drag to the page around it.
+
+**A pager is a scroll view on iOS only with `allowImplicitScrolling`.** Android calls any node with a scroll action
+scrollable. iOS makes a scroll view, the `ScrollView` XCUITest and Appium list, only for a node with the
+`hasImplicitScrolling` flag, and a `PageView` sets that flag only when `allowImplicitScrolling` is on; it is off by
+default. Left at the default, the pager scrolls on iOS but is a plain element, and the Top 10 row is the first scroll
+view: the first CI run of 1.1.0 found exactly that. The Lobby turns it on. The cost is small: the pager also builds the
+banner on each side of the one shown. Android leaves those hidden nodes out of its tree; iOS keeps them, so on an iPhone
+`lobby_banner_2` is in the tree, off screen, while banner 1 shows.
 
 ## Flutter-specific notes
 

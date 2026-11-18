@@ -134,6 +134,62 @@ void main() {
     semantics.dispose();
   });
 
+  // CI's first 1.1.0 run: XCUITest listed the Top 10 row as the first ScrollView and the pager not at all. iOS makes a
+  // scroll view only for a node with hasImplicitScrolling, and PageView sets that flag only with
+  // allowImplicitScrolling on. The Lobby's pager turns it on; this checks the flag, the order iOS gets, and that a
+  // PageView left at its default is not a scroll view to iOS (so the test would catch the flag being dropped).
+  testWidgets('on iOS the pager is a scroll view, the first one, then the Top 10 row, then the page', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final app = await TestApp.start(tester);
+    await openLobby(app);
+    record('ios-scroll-views-pager-on', [
+      for (final n in iosTree(tester).where((n) => n.iosScrollView))
+        '${ownerId(n)} ${n.horizontal ? 'horizontal' : 'vertical'} ${n.rect}',
+    ]);
+    expect(iosScrollViewOwners(app).take(3), [TestIds.lobbyPager, TestIds.lobbyTopRow, TestIds.lobbyPage]);
+    final pager = iosTree(tester).firstWhere((n) => n.iosScrollView);
+    expect(pager.horizontal, isTrue);
+    expect(pager.rect, platformNode(app, TestIds.lobbyPager)!.rect);
+    // every node Android calls scrollable before the page is a scroll view on iOS too, in the same order
+    final androidOrder = scrollableOwners(app).takeWhile((id) => id != TestIds.lobbyPage).toList();
+    expect(iosScrollViewOwners(app).takeWhile((id) => id != TestIds.lobbyPage).toList(), androidOrder);
+
+    await app.tap(TestIds.lobbyPagerShown);
+    record('ios-scroll-views-pager-off', [
+      for (final n in iosTree(tester).where((n) => n.iosScrollView))
+        '${ownerId(n)} ${n.horizontal ? 'horizontal' : 'vertical'} ${n.rect}',
+    ]);
+    expect(iosScrollViewOwners(app).take(2), [TestIds.lobbyTopRow, TestIds.lobbyPage]);
+    semantics.dispose();
+  });
+
+  testWidgets('a PageView at its default has scroll actions but no hasImplicitScrolling: not a scroll view on iOS', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    Future<SemanticsData> pagerNode({required bool implicit}) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: PageView(
+            key: UniqueKey(),
+            allowImplicitScrolling: implicit,
+            children: const [SizedBox.expand(), SizedBox.expand()],
+          ),
+        ),
+      );
+      return iosTree(tester).firstWhere((n) => n.scrollable).data;
+    }
+
+    final plain = await pagerNode(implicit: false);
+    expect(plain.hasAction(SemanticsAction.scrollLeft), isTrue);
+    expect(plain.flagsCollection.hasImplicitScrolling, isFalse);
+    final implicit = await pagerNode(implicit: true);
+    expect(implicit.hasAction(SemanticsAction.scrollLeft), isTrue);
+    expect(implicit.flagsCollection.hasImplicitScrolling, isTrue);
+    semantics.dispose();
+  });
+
   testWidgets('Saved is absent from the tree until its delay has passed, and a choice starts the count again', (
     tester,
   ) async {

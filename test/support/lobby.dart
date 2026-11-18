@@ -31,6 +31,13 @@ List<String> scrollableOwners(TestApp app) => [
     if (n.scrollable) ownerId(n),
 ];
 
+/// The nodes iOS makes a scroll view of, in the order XCUITest's `app.scrollViews` lists them, each named by its owner
+/// id.
+List<String> iosScrollViewOwners(TestApp app) => [
+  for (final n in iosTree(app.tester))
+    if (n.iosScrollView) ownerId(n),
+];
+
 PlatformNode firstScrollable(TestApp app) => platformTree(app.tester).firstWhere((n) => n.scrollable);
 
 /// The node with this id in the platform's tree, or null.
