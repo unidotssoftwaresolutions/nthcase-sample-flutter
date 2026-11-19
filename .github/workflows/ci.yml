@@ -2,9 +2,13 @@
 #
 #   the fast checks, on every run     android: the art, analyze, the tests but the goldens, the debug APK (ubuntu)
 #                                     ios: the goldens and the simulator app, zipped (macos: the goldens need its fonts,
-#                                     and only a Mac builds for the iOS Simulator)
+#                                     and only a Mac builds for the iOS Simulator); with the device suite, the UI tests
+#                                     built once for the simulator as well
 #   the device suite, when asked      android-device-ids: the ids on an Android emulator (ubuntu)
-#   (`devices: true`)                 ios-device-ids: the ids on an iOS simulator, and the zip installed with simctl
+#   (`devices: true`)                 ios-device-ids: the zip installed with simctl, and the ids on an iOS simulator,
+#                                     run on the UI tests the ios job built (no Flutter, no build here)
+#   always, last                      summary: every check in a table; it fails the run when any check failed or was
+#                                     cancelled, and lists a skipped one as skipped
 #
 # build.yml asks for the device suite on "Run workflow" and on the monthly schedule; release.yml always does. On a push
 # or a pull request the two device jobs are skipped: no emulator and no simulator starts.
@@ -16,6 +20,11 @@
 # Every check runs even when an earlier one failed, so one run tells everything: a check step runs once the setup it
 # needs succeeded (`!cancelled()` and that step's outcome), a job that needs another's build runs whenever that build
 # was uploaded, and each job still fails if any of its checks failed. Results and screenshots are uploaded either way.
+#
+# Each job is one part that can fail on its own, so "Re-run failed jobs" re-runs only what failed (and the summary).
+# The fast checks stay in their two jobs: each takes under a minute or two and they share Flutter, pub and Gradle's
+# setup. The two device jobs build nothing: each runs only its own checks on what android and ios built. There are no
+# retries anywhere: a flaky check is re-run by a person.
 #
 # Cached, under keys made of what they hold: pub's packages (pubspec.lock and the Flutter version) and Gradle's folders
 # (gradle/actions/setup-gradle's own keys). Only runs on main write a cache; a pull request reads it.
@@ -44,6 +53,12 @@ jobs:
     name: Analyze, test, APK
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    outputs:
+      art: ${{ steps.art.outcome }}
+      analyze: ${{ steps.analyze.outcome }}
+      tests: ${{ steps.tests.outcome }}
+      ndk: ${{ steps.ndk.outcome }}
+      apk: ${{ steps.apk.outcome }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
@@ -76,16 +91,19 @@ jobs:
         timeout-minutes: 10
         run: flutter pub get
       - name: The art in the app is art/, converted
+        id: art
         if: ${{ !cancelled() && steps.pub.outcome == 'success' }}
         timeout-minutes: 5
         run: |
           dart run tool/convert_art.dart
           git diff --exit-code -- lib android
-      - if: ${{ !cancelled() && steps.pub.outcome == 'success' }}
+      - id: analyze
+        if: ${{ !cancelled() && steps.pub.outcome == 'success' }}
         timeout-minutes: 10
         run: flutter analyze
       # The goldens compare pixels drawn by the host's font engine; they run in the macOS job.
-      - if: ${{ !cancelled() && steps.pub.outcome == 'success' }}
+      - id: tests
+        if: ${{ !cancelled() && steps.pub.outcome == 'success' }}
         timeout-minutes: 15
         run: flutter test --exclude-tags golden
       # The APK build needs the NDK Flutter names (android/app/build.gradle.kts: ndkVersion = flutter.ndkVersion). When
@@ -144,6 +162,11 @@ jobs:
     name: Goldens, simulator app
     runs-on: macos-latest
     timeout-minutes: 60
+    outputs:
+      goldens: ${{ steps.goldens.outcome }}
+      app: ${{ steps.build.outcome }}
+      zip: ${{ steps.zip.outcome }}
+      for_testing: ${{ steps.for_testing.outcome }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
@@ -207,14 +230,38 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 14
+      # Device suite: the UI tests (RunnerUITests), built here once, after the zip and with the same settings, so the
+      # app is the one just built. ios-device-ids runs them without building. The products go up in a tar, which
+      # keeps the executables' permissions (an artifact's zip does not).
+      - name: Build the UI tests for the simulator
+        id: for_testing
+        if: ${{ inputs.devices && !cancelled() && steps.build.outcome == 'success' }}
+        timeout-minutes: 30
+        run: |
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build/ios/DerivedData -jobs 4 \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build-for-testing
+          ls build/ios/DerivedData/Build/Products/*.xctestrun
+          tar -C build/ios/DerivedData/Build -cf build/ios-for-testing.tar Products
+      - if: ${{ !cancelled() && steps.for_testing.outcome == 'success' }}
+        timeout-minutes: 10
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-for-testing
+          path: build/ios-for-testing.tar
+          if-no-files-found: error
+          # long enough for "Re-run failed jobs" a week later: a re-run of ios-device-ids downloads this build again
+          retention-days: 7
 
   # The proof that the ids reach Appium: the tree UiAutomator2 reads, on an emulator (GitHub's machine). Device suite.
   android-device-ids:
     name: Ids on an Android emulator
     needs: android
-    if: ${{ inputs.devices && !cancelled() }}
+    if: ${{ inputs.devices && !cancelled() && needs.android.outputs.apk == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    outputs:
+      ids: ${{ steps.ids.outcome }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
@@ -230,6 +277,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        id: ids
         timeout-minutes: 40
         env:
           APK: dist/mossgrove-flutter-${{ inputs.version }}-debug.apk
@@ -254,39 +302,50 @@ jobs:
           retention-days: 14
 
   # The same proof for iOS: XCUITest's tree, the one Appium's XCUITest driver reads, on a simulator. It also installs
-  # the zipped simulator app on the newest iOS simulator with simctl, as NthCase does. Device suite.
+  # the zipped simulator app on the newest iOS simulator with simctl, as NthCase does. Device suite. Both run on what
+  # the ios job built: the zip, and the UI tests built for testing. Nothing is built here, and no Flutter is needed.
+  # The two checks share the simulator, which takes most of the install check's 4 minutes to boot, so they stay one job.
   ios-device-ids:
     name: Ids on an iOS simulator
     needs: ios
-    if: ${{ inputs.devices && !cancelled() }}
+    if: ${{ inputs.devices && !cancelled() && (needs.ios.outputs.zip == 'success' || needs.ios.outputs.for_testing == 'success') }}
     runs-on: macos-latest
     timeout-minutes: 60
+    outputs:
+      install: ${{ steps.install.outcome }}
+      ids: ${{ steps.ids.outcome }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - id: zip
+        if: ${{ needs.ios.outputs.zip == 'success' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         timeout-minutes: 5
         with:
           name: mossgrove-flutter-simulator
           path: dist
-      - name: Install Flutter ${{ env.FLUTTER_VERSION }}
-        timeout-minutes: 10
-        run: |
-          archive="flutter_macos_arm64_${FLUTTER_VERSION}-stable.zip"
-          curl -sSfL -o "$RUNNER_TEMP/$archive" "https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/$archive"
-          echo "6545b85938745dc5070e9faf2adf70233c1811009d87fe6d27bfcda5a04b7698  $RUNNER_TEMP/$archive" | shasum -a 256 -c -
-          unzip -q "$RUNNER_TEMP/$archive" -d "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
-      - name: Cache pub's packages
+      - if: ${{ !cancelled() && needs.ios.outputs.for_testing == 'success' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         timeout-minutes: 5
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
-          path: ~/.pub-cache
-          key: pub-${{ runner.os }}-${{ env.FLUTTER_VERSION }}-${{ hashFiles('pubspec.lock') }}
-      - timeout-minutes: 10
-        run: flutter --disable-analytics && flutter pub get
+          name: ios-for-testing
+          path: build
+      - name: Unpack the UI tests, built for testing
+        id: unpack
+        if: ${{ !cancelled() && needs.ios.outputs.for_testing == 'success' }}
+        timeout-minutes: 5
+        run: |
+          mkdir -p build/ios/DerivedData/Build
+          tar -C build/ios/DerivedData/Build -xf build/ios-for-testing.tar
+          runs=(build/ios/DerivedData/Build/Products/*.xctestrun)
+          if (( ${#runs[@]} != 1 )) || [[ ! -f "${runs[0]}" ]]; then
+            echo "the build should hold one .xctestrun; it holds: ${runs[*]}"
+            exit 1
+          fi
+          echo "XCTESTRUN=$PWD/${runs[0]}" >> "$GITHUB_ENV"
       - name: Pick a simulator on the newest iOS runtime, by its UDID
         id: sim
+        if: ${{ !cancelled() }}
         timeout-minutes: 5
         run: |
           read -r runtime devicetype < <(xcrun simctl list runtimes -j | python3 -c '
@@ -299,7 +358,8 @@ jobs:
           echo "runtime=$runtime udid=$udid"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
       - name: Install the zipped app with simctl and start it
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        id: install
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && steps.zip.outcome == 'success' }}
         timeout-minutes: 15
         env:
           UDID: ${{ steps.sim.outputs.udid }}
@@ -315,15 +375,14 @@ jobs:
           xcrun simctl terminate "$UDID" com.nthcase.sample
       # one test per part of the walk, each from a fresh launch; every missing id is reported with its line
       - name: XCUITest reads every screen's ids
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        id: ids
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && steps.unpack.outcome == 'success' }}
         timeout-minutes: 35
         env:
           UDID: ${{ steps.sim.outputs.udid }}
         run: |
-          flutter build ios --simulator --debug --no-codesign --config-only
-          xcodebuild test -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug \
-            -destination "id=$UDID" -derivedDataPath build/ios/DerivedData -jobs 4 \
-            -only-testing:RunnerUITests -resultBundlePath build/ios-ids.xcresult CODE_SIGNING_ALLOWED=NO
+          xcodebuild test-without-building -xctestrun "$XCTESTRUN" -destination "id=$UDID" \
+            -only-testing:RunnerUITests -resultBundlePath build/ios-ids.xcresult
       - name: The screenshots and trees, out of the result bundle
         if: always()
         timeout-minutes: 5
@@ -341,3 +400,62 @@ jobs:
             build/ios-ids-attachments/
           if-no-files-found: ignore
           retention-days: 14
+
+  # Every check, from each job's own outcomes, after every job whatever they found. A check is read from its job's
+  # outputs, or, when the job never wrote them (skipped, or stopped before), from the job's result: a skipped check is
+  # listed as skipped, never as passed. Fails the run when any check, or any job outside its checks, failed or was
+  # cancelled; release.yml's github-release needs this workflow, so it publishes only after this is green.
+  summary:
+    name: Every check
+    needs: [android, ios, android-device-ids, ios-device-ids]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Every check
+        timeout-minutes: 5
+        env:
+          CHECK_1: "The art in the app is art/, converted|${{ needs.android.outputs.art || needs.android.result }}"
+          CHECK_2: "flutter analyze|${{ needs.android.outputs.analyze || needs.android.result }}"
+          CHECK_3: "The tests but the goldens|${{ needs.android.outputs.tests || needs.android.result }}"
+          CHECK_4: "The NDK Flutter's build asks for|${{ needs.android.outputs.ndk || needs.android.result }}"
+          CHECK_5: "The debug APK|${{ needs.android.outputs.apk || needs.android.result }}"
+          CHECK_6: "Golden screenshots|${{ needs.ios.outputs.goldens || needs.ios.result }}"
+          CHECK_7: "The simulator app|${{ needs.ios.outputs.app || needs.ios.result }}"
+          CHECK_8: "The simulator app, zipped|${{ needs.ios.outputs.zip || needs.ios.result }}"
+          CHECK_9: "The UI tests, built for the simulator|${{ needs.ios.outputs.for_testing || needs.ios.result }}"
+          CHECK_10: "Ids on an Android emulator|${{ needs.android-device-ids.outputs.ids || needs.android-device-ids.result }}"
+          CHECK_11: "The zip installed and started on a simulator|${{ needs.ios-device-ids.outputs.install || needs.ios-device-ids.result }}"
+          CHECK_12: "Ids on an iOS simulator|${{ needs.ios-device-ids.outputs.ids || needs.ios-device-ids.result }}"
+          JOB_1: "android|${{ needs.android.result }}"
+          JOB_2: "ios|${{ needs.ios.result }}"
+          JOB_3: "android-device-ids|${{ needs.android-device-ids.result }}"
+          JOB_4: "ios-device-ids|${{ needs.ios-device-ids.result }}"
+        run: |
+          python3 - <<'EOF'
+          import os, sys
+
+          def numbered(prefix):
+              keys = [k for k in os.environ if k.startswith(prefix) and k[len(prefix):].isdigit()]
+              return [os.environ[k] for k in sorted(keys, key=lambda k: int(k[len(prefix):]))]
+
+          checks = [entry.rpartition("|")[::2] for entry in numbered("CHECK_")]
+          jobs = [entry.rpartition("|")[::2] for entry in numbered("JOB_")]
+          mark = {"success": "✅", "failure": "❌", "cancelled": "🚫"}
+          lines = ["## Every check", "", "| Check | Outcome |", "| --- | --- |"]
+          lines += [f"| {name} | {mark.get(outcome, '⏭️')} {outcome or 'not run'} |" for name, outcome in checks]
+          bad = ("failure", "cancelled")
+          failed = [name for name, outcome in checks if outcome in bad]
+          stray = [f"{job} ({result})" for job, result in jobs if result in bad]
+          if stray and not failed:
+              lines += ["", "A job failed outside its checks: " + ", ".join(stray)]
+          page = "\n".join(lines) + "\n"
+          print(page)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(page)
+          if failed or stray:
+              what = f"{len(failed)} of {len(checks)} checks failed or were cancelled: {', '.join(failed)}" if failed \
+                  else f"a job failed: {', '.join(stray)}"
+              print(f"::error title=Checks failed::{what}")
+              sys.exit(1)
+          EOF
